@@ -1,0 +1,2 @@
+# PHP_Laravel12_Schemaless_attributes
+PHP_Laravel12_Schemaless_attributes
