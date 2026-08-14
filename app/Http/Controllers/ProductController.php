@@ -26,21 +26,15 @@ class ProductController extends Controller
         |--------------------------------------------------------------------------
         | Global Search
         |--------------------------------------------------------------------------
-        |
-        | Search normal fields and schemaless JSON values.
-        |
         */
         if ($search !== null && $search !== '') {
             $query->where(function ($q) use ($search) {
-
                 $q->where('name', 'like', '%' . $search . '%')
-                    ->orWhere('description', 'like', '%' . $search . '%');
-
-                // Search inside JSON/schemaless attributes
-                $q->orWhereRaw(
-                    "JSON_SEARCH(extra_attributes, 'one', ?) IS NOT NULL",
-                    ['%' . $search . '%']
-                );
+                    ->orWhere('description', 'like', '%' . $search . '%')
+                    ->orWhereRaw(
+                        "JSON_SEARCH(extra_attributes, 'one', ?) IS NOT NULL",
+                        ['%' . $search . '%']
+                    );
             });
         }
 
@@ -49,23 +43,13 @@ class ProductController extends Controller
         | Dynamic Attribute Filter
         |--------------------------------------------------------------------------
         |
-        | Example:
-        | attribute = color
-        | value = Red
+        | The attribute can now be any valid schemaless attribute.
         |
         */
-        $allowedAttributes = [
-            'color',
-            'size',
-            'manufacturer',
-            'created_by',
-        ];
-
         if (
             $attribute &&
             $attributeValue !== null &&
-            $attributeValue !== '' &&
-            in_array($attribute, $allowedAttributes, true)
+            $attributeValue !== ''
         ) {
             $query->whereRaw(
                 "JSON_UNQUOTE(JSON_EXTRACT(extra_attributes, ?)) LIKE ?",
@@ -92,17 +76,16 @@ class ProductController extends Controller
                 $query->where(function ($q) {
                     $q->whereRaw(
                         "JSON_EXTRACT(extra_attributes, '$.in_stock') = false"
-                    )
-                        ->orWhereRaw(
-                            "JSON_EXTRACT(extra_attributes, '$.in_stock') IS NULL"
-                        );
+                    )->orWhereRaw(
+                        "JSON_EXTRACT(extra_attributes, '$.in_stock') IS NULL"
+                    );
                 });
             }
         }
 
         /*
         |--------------------------------------------------------------------------
-        | Price Minimum
+        | Minimum Price
         |--------------------------------------------------------------------------
         */
         if ($priceMin !== null && $priceMin !== '') {
@@ -111,7 +94,7 @@ class ProductController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Price Maximum
+        | Maximum Price
         |--------------------------------------------------------------------------
         */
         if ($priceMax !== null && $priceMax !== '') {
@@ -134,7 +117,6 @@ class ProductController extends Controller
         |--------------------------------------------------------------------------
         */
         $totalProducts = Product::count();
-
         $filteredProducts = $products->total();
 
         return view('products.index', compact(
@@ -167,33 +149,45 @@ class ProductController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'price' => 'required|numeric|min:0',
-            'color' => 'nullable|string|max:100',
-            'size' => 'nullable|string|max:100',
-            'weight' => 'nullable|numeric|min:0',
-            'manufacturer' => 'nullable|string|max:255',
-            'warranty_years' => 'nullable|integer|min:0',
+
+            'attribute_name' => 'nullable|array',
+            'attribute_name.*' => [
+                'nullable',
+                'string',
+                'max:100',
+                'regex:/^[a-zA-Z][a-zA-Z0-9_]*$/',
+            ],
+
+            'attribute_value' => 'nullable|array',
+            'attribute_value.*' => 'nullable|string|max:1000',
+
+            'attribute_type' => 'nullable|array',
+            'attribute_type.*' => 'nullable|in:text,number,boolean,date',
+        ], [
+            'attribute_name.*.regex' =>
+                'Attribute names may contain only letters, numbers and underscores, and must start with a letter.',
         ]);
 
         $product = new Product();
 
         $product->name = $validated['name'];
-        $product->description = $validated['description'];
+        $product->description = $validated['description'] ?? null;
         $product->price = $validated['price'];
 
-        $extraAttributes = [
-            'color' => $request->color,
-            'size' => $request->size,
-            'weight' => $request->weight,
-            'manufacturer' => $request->manufacturer,
-            'warranty_years' => $request->warranty_years,
-            'created_by' => 'admin',
-            'in_stock' => true,
-        ];
+        /*
+        |--------------------------------------------------------------------------
+        | Build Dynamic Schemaless Attributes
+        |--------------------------------------------------------------------------
+        */
+        $extraAttributes = $this->buildDynamicAttributes($request);
 
-        $extraAttributes = array_filter(
-            $extraAttributes,
-            fn($value) => !is_null($value) && $value !== ''
-        );
+        /*
+        |--------------------------------------------------------------------------
+        | Default Attributes
+        |--------------------------------------------------------------------------
+        */
+        $extraAttributes['created_by'] = 'admin';
+        $extraAttributes['in_stock'] = true;
 
         $product->extra_attributes = $extraAttributes;
 
@@ -229,32 +223,61 @@ class ProductController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'price' => 'required|numeric|min:0',
-            'color' => 'nullable|string|max:100',
-            'size' => 'nullable|string|max:100',
-            'weight' => 'nullable|numeric|min:0',
-            'manufacturer' => 'nullable|string|max:255',
-            'warranty_years' => 'nullable|integer|min:0',
+
+            'attribute_name' => 'nullable|array',
+            'attribute_name.*' => [
+                'nullable',
+                'string',
+                'max:100',
+                'regex:/^[a-zA-Z][a-zA-Z0-9_]*$/',
+            ],
+
+            'attribute_value' => 'nullable|array',
+            'attribute_value.*' => 'nullable|string|max:1000',
+
+            'attribute_type' => 'nullable|array',
+            'attribute_type.*' => 'nullable|in:text,number,boolean,date',
+        ], [
+            'attribute_name.*.regex' =>
+                'Attribute names may contain only letters, numbers and underscores, and must start with a letter.',
         ]);
 
         $product->name = $validated['name'];
-        $product->description = $validated['description'];
+        $product->description = $validated['description'] ?? null;
         $product->price = $validated['price'];
 
-        $extraAttributes = $product->extra_attributes
+        /*
+        |--------------------------------------------------------------------------
+        | Existing Attributes
+        |--------------------------------------------------------------------------
+        */
+        $existingAttributes = $product->extra_attributes
             ? $product->extra_attributes->toArray()
             : [];
 
-        $extraAttributes['color'] = $request->color;
-        $extraAttributes['size'] = $request->size;
-        $extraAttributes['weight'] = $request->weight;
-        $extraAttributes['manufacturer'] = $request->manufacturer;
-        $extraAttributes['warranty_years'] = $request->warranty_years;
-        $extraAttributes['updated_at'] = now()->toDateTimeString();
+        /*
+        |--------------------------------------------------------------------------
+        | Preserve System Attributes
+        |--------------------------------------------------------------------------
+        */
+        $createdBy = $existingAttributes['created_by'] ?? 'admin';
+        $inStock = $existingAttributes['in_stock'] ?? true;
 
-        $extraAttributes = array_filter(
-            $extraAttributes,
-            fn($value) => !is_null($value) && $value !== ''
-        );
+        /*
+        |--------------------------------------------------------------------------
+        | Build New Dynamic Attributes
+        |--------------------------------------------------------------------------
+        */
+        $extraAttributes = $this->buildDynamicAttributes($request);
+
+        /*
+        |--------------------------------------------------------------------------
+        | System Attributes
+        |--------------------------------------------------------------------------
+        */
+        $extraAttributes['created_by'] = $createdBy;
+        $extraAttributes['in_stock'] = $inStock;
+        $extraAttributes['updated_at'] = now()->toDateTimeString();
 
         $product->extra_attributes = $extraAttributes;
 
@@ -278,9 +301,7 @@ class ProductController extends Controller
     }
 
     /**
-     * Old attribute search route.
-     *
-     * Kept for compatibility with the existing project.
+     * Search products by dynamic attribute.
      */
     public function searchByAttribute(Request $request)
     {
@@ -311,7 +332,6 @@ class ProductController extends Controller
         */
         if ($search !== null && $search !== '') {
             $query->where(function ($q) use ($search) {
-
                 $q->where('name', 'like', '%' . $search . '%')
                     ->orWhere('description', 'like', '%' . $search . '%')
                     ->orWhereRaw(
@@ -323,21 +343,13 @@ class ProductController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Attribute filter
+        | Dynamic Attribute Filter
         |--------------------------------------------------------------------------
         */
-        $allowedAttributes = [
-            'color',
-            'size',
-            'manufacturer',
-            'created_by',
-        ];
-
         if (
             $attribute &&
             $attributeValue !== null &&
-            $attributeValue !== '' &&
-            in_array($attribute, $allowedAttributes, true)
+            $attributeValue !== ''
         ) {
             $query->whereRaw(
                 "JSON_UNQUOTE(JSON_EXTRACT(extra_attributes, ?)) LIKE ?",
@@ -350,7 +362,7 @@ class ProductController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | Stock filter
+        | Stock Filter
         |--------------------------------------------------------------------------
         */
         if ($stock !== null && $stock !== '') {
@@ -364,17 +376,16 @@ class ProductController extends Controller
                 $query->where(function ($q) {
                     $q->whereRaw(
                         "JSON_EXTRACT(extra_attributes, '$.in_stock') = false"
-                    )
-                        ->orWhereRaw(
-                            "JSON_EXTRACT(extra_attributes, '$.in_stock') IS NULL"
-                        );
+                    )->orWhereRaw(
+                        "JSON_EXTRACT(extra_attributes, '$.in_stock') IS NULL"
+                    );
                 });
             }
         }
 
         /*
         |--------------------------------------------------------------------------
-        | Price filters
+        | Price Filters
         |--------------------------------------------------------------------------
         */
         if ($priceMin !== null && $priceMin !== '') {
@@ -390,36 +401,18 @@ class ProductController extends Controller
         $filename = 'products-' . now()->format('Y-m-d-H-i-s') . '.csv';
 
         return response()->streamDownload(function () use ($products) {
-
             $handle = fopen('php://output', 'w');
 
-            /*
-            |--------------------------------------------------------------------------
-            | CSV Header
-            |--------------------------------------------------------------------------
-            */
             fputcsv($handle, [
                 'ID',
                 'Name',
                 'Description',
                 'Price',
-                'Color',
-                'Size',
-                'Weight',
-                'Manufacturer',
-                'Warranty Years',
-                'Created By',
-                'In Stock',
+                'Dynamic Attributes',
                 'Created At',
             ]);
 
-            /*
-            |--------------------------------------------------------------------------
-            | CSV Rows
-            |--------------------------------------------------------------------------
-            */
             foreach ($products as $product) {
-
                 $attributes = $product->extra_attributes
                     ? $product->extra_attributes->toArray()
                     : [];
@@ -429,15 +422,7 @@ class ProductController extends Controller
                     $product->name,
                     $product->description,
                     $product->price,
-                    $attributes['color'] ?? '',
-                    $attributes['size'] ?? '',
-                    $attributes['weight'] ?? '',
-                    $attributes['manufacturer'] ?? '',
-                    $attributes['warranty_years'] ?? '',
-                    $attributes['created_by'] ?? '',
-                    isset($attributes['in_stock'])
-                        ? ($attributes['in_stock'] ? 'Yes' : 'No')
-                        : 'No',
+                    json_encode($attributes),
                     optional($product->created_at)->format('Y-m-d H:i:s'),
                 ]);
             }
@@ -446,5 +431,91 @@ class ProductController extends Controller
         }, $filename, [
             'Content-Type' => 'text/csv; charset=UTF-8',
         ]);
+    }
+
+    /**
+     * Build typed dynamic schemaless attributes.
+     */
+    private function buildDynamicAttributes(Request $request): array
+    {
+        $names = $request->input('attribute_name', []);
+        $values = $request->input('attribute_value', []);
+        $types = $request->input('attribute_type', []);
+
+        $attributes = [];
+
+        foreach ($names as $index => $name) {
+            $name = trim($name ?? '');
+
+            if ($name === '') {
+                continue;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | Prevent system fields from being overwritten
+            |--------------------------------------------------------------------------
+            */
+            if (in_array($name, [
+                'created_by',
+                'in_stock',
+                'updated_at',
+            ], true)) {
+                continue;
+            }
+
+            $value = $values[$index] ?? '';
+            $type = $types[$index] ?? 'text';
+
+            /*
+            |--------------------------------------------------------------------------
+            | Convert Value According To Type
+            |--------------------------------------------------------------------------
+            */
+            switch ($type) {
+                case 'number':
+                    if ($value === '') {
+                        continue 2;
+                    }
+
+                    $attributes[$name] = is_numeric($value)
+                        ? (str_contains((string) $value, '.')
+                            ? (float) $value
+                            : (int) $value)
+                        : $value;
+
+                    break;
+
+                case 'boolean':
+                    $attributes[$name] = in_array(
+                        strtolower((string) $value),
+                        ['1', 'true', 'yes', 'on'],
+                        true
+                    );
+
+                    break;
+
+                case 'date':
+                    if ($value === '') {
+                        continue 2;
+                    }
+
+                    $attributes[$name] = $value;
+
+                    break;
+
+                case 'text':
+                default:
+                    if ($value === '') {
+                        continue 2;
+                    }
+
+                    $attributes[$name] = (string) $value;
+
+                    break;
+            }
+        }
+
+        return $attributes;
     }
 }
