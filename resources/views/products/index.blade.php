@@ -31,23 +31,6 @@
     </div>
 
 
-    {{-- Success Message --}}
-    @if(session('success'))
-
-    <div class="alert alert-success alert-dismissible fade show">
-
-        {{ session('success') }}
-
-        <button type="button"
-            class="btn-close"
-            data-bs-dismiss="alert">
-        </button>
-
-    </div>
-
-    @endif
-
-
     {{-- Statistics --}}
     <div class="row g-3 mb-4">
 
@@ -257,7 +240,8 @@
                     {{-- Buttons --}}
                     <div class="col-lg-6 d-flex align-items-end gap-2">
 
-                        <button type="submit"
+                        <button
+                            type="submit"
                             class="btn btn-primary">
 
                             🔎 Search / Filter
@@ -265,7 +249,8 @@
                         </button>
 
 
-                        <a href="{{ route('products.index') }}"
+                        <a
+                            href="{{ route('products.index') }}"
                             class="btn btn-secondary">
 
                             Reset
@@ -299,53 +284,74 @@
     $search ||
     $attribute ||
     $attributeValue ||
-    $stock !== null && $stock !== '' ||
-    $priceMin !== null && $priceMin !== '' ||
-    $priceMax !== null && $priceMax !== ''
+    ($stock !== null && $stock !== '') ||
+    ($priceMin !== null && $priceMin !== '') ||
+    ($priceMax !== null && $priceMax !== '')
     )
 
     <div class="alert alert-info">
 
-        <strong>Active filters:</strong>
+        <strong>
+            Active filters:
+        </strong>
 
         @if($search)
+
         <span class="badge bg-primary">
             Search: {{ $search }}
         </span>
+
         @endif
 
+
         @if($attribute)
+
         <span class="badge bg-dark">
             {{ ucfirst($attribute) }}
         </span>
+
         @endif
 
+
         @if($attributeValue)
+
         <span class="badge bg-secondary">
             Value: {{ $attributeValue }}
         </span>
+
         @endif
 
+
         @if($stock === '1')
+
         <span class="badge bg-success">
             In Stock
         </span>
+
         @elseif($stock === '0')
+
         <span class="badge bg-danger">
             Out of Stock
         </span>
+
         @endif
 
+
         @if($priceMin !== null && $priceMin !== '')
+
         <span class="badge bg-info text-dark">
             Min: {{ $priceMin }}
         </span>
+
         @endif
 
+
         @if($priceMax !== null && $priceMax !== '')
+
         <span class="badge bg-info text-dark">
             Max: {{ $priceMax }}
         </span>
+
         @endif
 
     </div>
@@ -392,7 +398,9 @@
 
                         <tr>
 
-                            <th>#</th>
+                            <th>
+                                #
+                            </th>
 
                             <th>
                                 Product
@@ -412,6 +420,11 @@
 
                             <th>
                                 Manufacturer
+                            </th>
+
+                            {{-- NEW --}}
+                            <th>
+                                Dynamic Attributes
                             </th>
 
                             <th>
@@ -441,16 +454,58 @@
                         ? $product->extra_attributes->toArray()
                         : [];
 
+                        /*
+                        * Normalize attribute keys so that:
+                        *
+                        * Color -> color
+                        * Size -> size
+                        * Manufacturer -> manufacturer
+                        * Manufacture -> manufacturer
+                        */
+                        $normalizedAttributes = [];
+
+                        foreach ($attributes as $key => $value) {
+
+                        $normalizedKey = strtolower(trim($key));
+
+                        if ($normalizedKey === 'manufacture') {
+                        $normalizedKey = 'manufacturer';
+                        }
+
+                        $normalizedAttributes[$normalizedKey] = $value;
+                        }
+
+
+                        /*
+                        * Attributes displayed in dedicated columns.
+                        */
+                        $systemAttributes = [
+                        'color',
+                        'size',
+                        'manufacturer',
+                        'in_stock',
+                        'created_by',
+                        ];
+
+
+                        /*
+                        * Only keep attributes that are genuinely dynamic.
+                        */
+                        $dynamicAttributes = collect($normalizedAttributes)
+                        ->except($systemAttributes);
+
                         @endphp
 
 
                         <tr>
 
+                            {{-- ID --}}
                             <td>
                                 {{ $product->id }}
                             </td>
 
 
+                            {{-- Product --}}
                             <td>
 
                                 <div class="fw-bold">
@@ -469,6 +524,7 @@
                             </td>
 
 
+                            {{-- Price --}}
                             <td>
 
                                 <strong>
@@ -478,30 +534,82 @@
                             </td>
 
 
+                            {{-- Color --}}
+                            <td>
+                                {{ $normalizedAttributes['color'] ?? '-' }}
+                            </td>
+
+
+                            {{-- Size --}}
                             <td>
 
-                                {{ $attributes['color'] ?? '-' }}
+                                {{ $normalizedAttributes['size'] ?? '-' }}
 
                             </td>
 
 
+                            {{-- Manufacturer --}}
                             <td>
 
-                                {{ $attributes['size'] ?? '-' }}
+                                {{ $normalizedAttributes['manufacturer'] ?? '-' }}
 
                             </td>
 
 
-                            <td>
+                            {{-- Dynamic Attributes --}}
+                            <td style="min-width: 220px;">
 
-                                {{ $attributes['manufacturer'] ?? '-' }}
+                                @if($dynamicAttributes->isNotEmpty())
+
+                                <div class="d-flex flex-column gap-1">
+
+                                    @foreach($dynamicAttributes as $key => $value)
+
+                                    <div>
+
+                                        <strong>
+                                            {{ \Illuminate\Support\Str::headline($key) }}:
+                                        </strong>
+
+                                        @if(is_bool($value))
+
+                                        {{ $value ? 'Yes' : 'No' }}
+
+                                        @elseif(is_array($value))
+
+                                        {{ implode(', ', $value) }}
+
+                                        @elseif(is_null($value))
+
+                                        —
+
+                                        @else
+
+                                        {{ $value }}
+
+                                        @endif
+
+                                    </div>
+
+                                    @endforeach
+
+                                </div>
+
+                                @else
+
+                                <span class="text-muted">
+                                    —
+                                </span>
+
+                                @endif
 
                             </td>
 
 
+                            {{-- Stock --}}
                             <td>
 
-                                @if($attributes['in_stock'] ?? false)
+                                @if($normalizedAttributes['in_stock'] ?? false)
 
                                 <span class="badge bg-success">
                                     In Stock
@@ -518,6 +626,7 @@
                             </td>
 
 
+                            {{-- Created --}}
                             <td>
 
                                 <small>
@@ -527,6 +636,7 @@
                             </td>
 
 
+                            {{-- Actions --}}
                             <td>
 
                                 <div class="d-flex gap-1">
@@ -534,14 +644,18 @@
                                     <a
                                         href="{{ route('products.show', $product) }}"
                                         class="btn btn-sm btn-info text-white">
+
                                         View
+
                                     </a>
 
 
                                     <a
                                         href="{{ route('products.edit', $product) }}"
                                         class="btn btn-sm btn-warning">
+
                                         Edit
+
                                     </a>
 
 
@@ -557,7 +671,9 @@
                                         <button
                                             type="submit"
                                             class="btn btn-sm btn-danger">
+
                                             Delete
+
                                         </button>
 
                                     </form>
@@ -568,11 +684,13 @@
 
                         </tr>
 
+
                         @empty
 
                         <tr>
 
-                            <td colspan="9"
+                            <td
+                                colspan="10"
                                 class="text-center py-5">
 
                                 <h5>
@@ -586,7 +704,9 @@
                                 <a
                                     href="{{ route('products.index') }}"
                                     class="btn btn-secondary">
+
                                     Clear Filters
+
                                 </a>
 
                             </td>
